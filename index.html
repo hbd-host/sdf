@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Deteksi Wajah & Tubuh</title>
+    <style>
+        body {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            background-color: #111;
+            margin: 0;
+            position: relative;
+        }
+        
+        video {
+            width: 100%;
+            max-width: 640px;
+            border: 2px solid white;
+            box-shadow: 0 0 10px rgba(0, 255, 255, 0.6);
+        }
+        
+        canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+        }
+        
+        #label {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: white;
+            font-size: 18px;
+            font-weight: bold;
+        }
+    </style>
+</head>
+
+<body>
+    <video id="video" autoplay playsinline></video>
+    <canvas id="canvas"></canvas>
+    <div id="label">Menunggu deteksi...</div>
+
+    <!-- Memuat TensorFlow.js & Model Deteksi -->
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
+    <script src="https://cdn.jsdelivr.net/npm/face-api.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/body-pix"></script>
+
+    <script>
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('canvas');
+        const context = canvas.getContext('2d');
+        const label = document.getElementById('label');
+
+        let faceApiLoaded = false;
+        let bodyPixModel = null;
+
+        // Memuat model Face API dari CDN
+        async function loadFaceApiModels() {
+            console.log("Memuat model Face API...");
+            await faceapi.nets.ssdMobilenetv1.loadFromUri('https://cdn.jsdelivr.net/npm/face-api.js/weights');
+            await faceapi.nets.faceLandmark68Net.loadFromUri('https://cdn.jsdelivr.net/npm/face-api.js/weights');
+            faceApiLoaded = true;
+            console.log("Model Face API berhasil dimuat");
+            startCamera();
+        }
+
+        // Memuat model BodyPix untuk deteksi tubuh
+        async function loadBodyPixModel() {
+            console.log("Memuat model BodyPix...");
+            bodyPixModel = await bodyPix.load();
+            console.log("Model BodyPix berhasil dimuat");
+            startCamera();
+        }
+
+        // Mengakses kamera perangkat
+        async function startCamera() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: true
+                });
+                video.srcObject = stream;
+
+                video.addEventListener('play', () => {
+                    canvas.width = video.videoWidth;
+                    canvas.height = video.videoHeight;
+                    detectFaceAndBody();
+                });
+            } catch (error) {
+                console.error("Gagal mengakses kamera:", error);
+                label.innerText = "Izin kamera diperlukan!";
+            }
+        }
+
+        // Deteksi Wajah dan Tubuh
+        async function detectFaceAndBody() {
+            if (faceApiLoaded && bodyPixModel) {
+                setInterval(async() => {
+                    context.clearRect(0, 0, canvas.width, canvas.height); // Bersihkan canvas
+
+                    // Deteksi Wajah
+                    const detections = await faceapi.detectAllFaces(video)
+                        .withFaceLandmarks();
+
+                    if (detections.length > 0) {
+                        label.innerText = "Wajah Terdeteksi";
+
+                        // Gambar kotak di sekitar wajah
+                        detections.forEach(detection => {
+                            const {
+                                x,
+                                y,
+                                width,
+                                height
+                            } = detection.alignedRect.box;
+                            context.beginPath();
+                            context.rect(x, y, width, height);
+                            context.lineWidth = 3;
+                            context.strokeStyle = 'yellow';
+                            context.stroke();
+                        });
+
+                        // Gambar landmark wajah (mata, hidung, bibir)
+                        detections.forEach(detection => {
+                            const landmarks = detection.landmarks;
+                            const points = landmarks.getPositions();
+
+                            points.forEach(point => {
+                                context.beginPath();
+                                context.arc(point.x, point.y, 3, 0, 2 * Math.PI);
+                                context.fillStyle = 'red';
+                                context.fill();
+                            });
+                        });
+                    } else {
+                        label.innerText = "Menunggu deteksi...";
+                    }
+
+                    // Deteksi Tubuh menggunakan BodyPix
+                    const segmentation = await bodyPixModel.segmentPerson(video);
+                    const mask = bodyPix.toMask(segmentation);
+                    const imageData = new ImageData(new Uint8ClampedArray(mask.data), mask.width, mask.height);
+                    context.putImageData(imageData, 0, 0);
+                }, 100);
+            }
+        }
+
+        // Mulai Memuat Model
+        loadFaceApiModels();
+        loadBodyPixModel();
+    </script>
+</body>
+
+</html>
